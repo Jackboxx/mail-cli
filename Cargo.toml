@@ -6,3 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+dotenv = "0.15.0"
+imap = "2.4.1"
+native-tls = "0.2.11"
+reqwest = { version = "0.11.18", features = ["json"] }
+rpassword = "7.2.0"
+serde = { version = "1.0.164", features = ["derive"] }
+tokio = { version = "1.28.2", features = ["full"] }
