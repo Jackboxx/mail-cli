@@ -103,45 +103,55 @@ fn fetch_top_n_msg_from_inbox(
     Ok(clean_mails)
 }
 
+async fn login(email: String) -> anyhow::Result<()> {
+    let auth_params = GoogleOAuthParams::default();
+
+    println!("{}", auth_params.get_token_request_url());
+    println!("paste code here:");
+
+    let stdin = stdin();
+    let code = stdin
+        .lock()
+        .lines()
+        .next()
+        .expect("there was no next line")?;
+
+    let client = Client::new();
+
+    let GoogleOAuthTokenRequestResponse {
+        access_token,
+        refresh_token,
+    } = request_google_oauth_token(&client, &auth_params, &code).await?;
+
+    let user_data = UserData {
+        email,
+        access_token,
+        refresh_token,
+    };
+
+    write_user_data(&user_data)
+}
+
+/// writes user data to `user.toml` file creating all parent directories in the process
+fn write_user_data(data: &UserData) -> anyhow::Result<()> {
+    if let Some(base_dir) = directories::BaseDirs::new() {
+        let data_dir = base_dir.data_dir().join("mail-cli/");
+
+        fs::create_dir_all(&data_dir)?;
+        fs::write(&data_dir.join("user.toml"), toml::to_string_pretty(data)?)?;
+
+        Ok(())
+    } else {
+        Err(anyhow!("failed to find home directory"))
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = CliArgs::parse();
 
     match args.command {
-        Commands::Login { email } => {
-            let auth_params = GoogleOAuthParams::default();
-
-            println!("{}", auth_params.get_token_request_url());
-            println!("paste code here:");
-
-            let stdin = stdin();
-            let code = stdin
-                .lock()
-                .lines()
-                .next()
-                .expect("there was no next line")?;
-
-            let client = Client::new();
-
-            let GoogleOAuthTokenRequestResponse {
-                access_token,
-                refresh_token,
-            } = request_google_oauth_token(&client, &auth_params, &code).await?;
-
-            if let Some(base_dir) = directories::BaseDirs::new() {
-                let data_dir = base_dir.data_dir().join("mail-cli/");
-                let data = UserData {
-                    email,
-                    access_token,
-                    refresh_token,
-                };
-
-                fs::create_dir_all(&data_dir)?;
-                fs::write(&data_dir.join("user.toml"), toml::to_string_pretty(&data)?)?;
-            } else {
-                todo!();
-            }
-        }
+        Commands::Login { email } => login(email).await?,
         Commands::Read { n } => {
             if let Some(base_dir) = directories::BaseDirs::new() {
                 let data_file = base_dir.data_dir().join("mail-cli/user.toml");
