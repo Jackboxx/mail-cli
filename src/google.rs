@@ -2,6 +2,9 @@ use anyhow::anyhow;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
+pub static GOOGLE_CLIENT_ID: &str =
+    "595889029500-45v36gai2da7jh6io8h7f2077bfv8cd2.apps.googleusercontent.com";
+pub static GOOGLE_CLIENT_SECRET: &str = "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";
 pub static GOOGLE_AUTH_ROOT_URL: &str = "https://oauth2.googleapis.com/token";
 pub static GOOGLE_IMAP_DOMAIN: &str = "imap.gmail.com";
 pub static GOOGLE_IMAP_PORT: u16 = 993;
@@ -9,6 +12,7 @@ pub static GOOGLE_IMAP_PORT: u16 = 993;
 #[derive(Debug, Clone, Deserialize)]
 pub struct GoogleOAuthResponse {
     pub access_token: String,
+    pub refresh_token: String,
 }
 
 #[derive(Debug, Clone)]
@@ -20,17 +24,19 @@ pub struct GoogleOAuthParams {
     scopes: String,
 }
 
-impl GoogleOAuthParams {
-    pub fn new(client_id: String, client_secret: String) -> Self {
+impl Default for GoogleOAuthParams {
+    fn default() -> Self {
         Self {
-            client_id,
-            client_secret,
+            client_id: GOOGLE_CLIENT_ID.to_owned(),
+            client_secret: GOOGLE_CLIENT_SECRET.to_owned(),
             redirect_url: "urn:ietf:wg:oauth:2.0:oob".to_owned(),
             grant_type: "authorization_code".to_owned(),
             scopes: "https://mail.google.com".to_owned(),
         }
     }
+}
 
+impl GoogleOAuthParams {
     pub fn to_form_params<'a>(&'a self, auth_code: &'a str) -> [(&'a str, &'a str); 5] {
         [
             ("grant_type", &self.grant_type),

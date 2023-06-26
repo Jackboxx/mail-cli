@@ -1,13 +1,14 @@
 use std::{
-    io::{self, BufRead},
+    fs,
+    io::{stdin, BufRead},
     net::TcpStream,
 };
 
 use anyhow::{anyhow, Ok};
-use clap::Parser;
-use dotenv::dotenv;
+use clap::{Parser, Subcommand};
 use imap::Session;
 use native_tls::TlsStream;
+use serde::{Deserialize, Serialize};
 
 use crate::google::{
     request_google_oauth_token, GoogleOAuthParams, GoogleOAuthResponse, GOOGLE_IMAP_DOMAIN,
@@ -20,12 +21,24 @@ extern crate rpassword;
 
 mod google;
 
-#[derive(Parser, Debug)]
+#[derive(Debug, Subcommand)]
+enum Commands {
+    #[command(about = "login to email", long_about = "login to email")]
+    Login { email: String },
+}
+
+#[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct CliArgs {
-    // email connect to
-    #[arg(short, long)]
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UserData {
     email: String,
+    access_token: String,
+    refresh_token: String,
 }
 
 struct ImapOAuth2 {
@@ -89,34 +102,51 @@ fn fetch_top_n_msg_from_inbox(
 async fn main() -> anyhow::Result<()> {
     let args = CliArgs::parse();
 
-    dotenv().ok();
-    let stdin = io::stdin();
+    match args.command {
+        Commands::Login { email } => {
+            let auth_params = GoogleOAuthParams::default();
 
-    let auth_params =
-        GoogleOAuthParams::new(dotenv::var("CLIENT_ID")?, dotenv::var("CLIENT_SECRET")?);
+            println!("{}", auth_params.get_token_request_url());
+            println!("paste code here:");
 
-    println!("{}", auth_params.get_token_request_url());
-    println!("paste code here:");
+            let stdin = stdin();
+            let code = stdin
+                .lock()
+                .lines()
+                .next()
+                .expect("there was no next line")?;
 
-    let code = stdin
-        .lock()
-        .lines()
-        .next()
-        .expect("there was no next line")?;
+            let GoogleOAuthResponse {
+                access_token,
+                refresh_token,
+            } = request_google_oauth_token(&auth_params, &code).await?;
 
-    let GoogleOAuthResponse { access_token } =
-        request_google_oauth_token(&auth_params, &code).await?;
+            if let Some(base_dir) = directories::BaseDirs::new() {
+                let data_dir = base_dir.data_dir().join("mail-cli/");
+                let data = UserData {
+                    email,
+                    access_token,
+                    refresh_token,
+                };
 
-    let imap_auth = ImapOAuth2 {
-        user: args.email,
-        access_token,
-    };
+                fs::create_dir_all(&data_dir)?;
+                fs::write(&data_dir.join("user.toml"), toml::to_string_pretty(&data)?)?;
+            }
 
-    let mut session = create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?;
-    let msg = fetch_top_n_msg_from_inbox(&mut session, 2)?;
+            // let imap_auth = ImapOAuth2 {
+            //     user: email,
+            //     access_token,
+            // };
 
-    println!("{msg:?}");
+            // let mut session =
+            //     create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?;
+            // let msg = fetch_top_n_msg_from_inbox(&mut session, 2)?;
 
-    session.logout()?;
+            // println!("{msg:?}");
+
+            // session.logout()?;
+        }
+    }
+
     Ok(())
 }
