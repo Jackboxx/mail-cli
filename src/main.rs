@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Ok};
+use clap::Parser;
 use dotenv::dotenv;
 use imap::Session;
 use native_tls::TlsStream;
@@ -18,6 +19,14 @@ extern crate native_tls;
 extern crate rpassword;
 
 mod google;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct CliArgs {
+    // email connect to
+    #[arg(short, long)]
+    email: String,
+}
 
 struct ImapOAuth2 {
     user: String,
@@ -78,15 +87,10 @@ fn fetch_top_n_msg_from_inbox(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = CliArgs::parse();
+
     dotenv().ok();
     let stdin = io::stdin();
-
-    println!("enter your email:");
-    let email = stdin
-        .lock()
-        .lines()
-        .next()
-        .expect("there was no next line")?;
 
     let auth_params =
         GoogleOAuthParams::new(dotenv::var("CLIENT_ID")?, dotenv::var("CLIENT_SECRET")?);
@@ -104,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
         request_google_oauth_token(&auth_params, &code).await?;
 
     let imap_auth = ImapOAuth2 {
-        user: email,
+        user: args.email,
         access_token,
     };
 
