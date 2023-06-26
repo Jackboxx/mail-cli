@@ -1,7 +1,12 @@
-use std::io::{self, BufRead};
+use std::{
+    io::{self, BufRead},
+    net::TcpStream,
+};
 
 use anyhow::{anyhow, Ok};
 use dotenv::dotenv;
+use imap::Session;
+use native_tls::TlsStream;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
@@ -10,6 +15,8 @@ extern crate native_tls;
 extern crate rpassword;
 
 static GOOGLE_AUTH_ROOT_URL: &str = "https://oauth2.googleapis.com/token";
+static GOOGLE_IMAP_DOMAIN: &str = "imap.gmail.com";
+static GOOGLE_IMAP_PORT: u16 = 993;
 
 struct ImapOAuth2 {
     user: String,
@@ -97,42 +104,46 @@ pub async fn request_google_oauth_token(
     }
 }
 
-fn fetch_inbox_top(access_token: String) -> anyhow::Result<Option<String>> {
-    let domain = "imap.gmail.com";
-    let tls = native_tls::TlsConnector::builder().build().unwrap();
+fn create_imap_session(
+    domain: &str,
+    port: u16,
+    imap_auth: &ImapOAuth2,
+) -> anyhow::Result<Session<TlsStream<TcpStream>>> {
+    let tls = native_tls::TlsConnector::builder().build()?;
+    let client = imap::connect((domain, port), domain, &tls)?;
 
-    // we pass in the domain twice to check that the server's TLS
-    // certificate is valid for the domain we're connecting to.
-    let client = imap::connect((domain, 993), domain, &tls).unwrap();
+    Ok(client
+        .authenticate("XOAUTH2", imap_auth)
+        .map_err(|err| anyhow!(format!("{err:?}")))?)
+}
 
-    let auth = ImapOAuth2 {
-        user: "gschwantnermoritz@gmail.com".to_owned(),
-        access_token: access_token.to_owned(),
-    };
-
-    let mut session = client.authenticate("XOAUTH2", &auth).unwrap();
-    // we want to fetch the first email in the INBOX mailbox
+fn fetch_top_n_msg_from_inbox(
+    session: &mut Session<TlsStream<TcpStream>>,
+    n: u32,
+) -> anyhow::Result<Vec<String>> {
     session.select("INBOX")?;
 
-    // fetch message number 1 in this mailbox, along with its RFC822 field.
-    // RFC 822 dictates the format of the body of e-mails
-    let messages = session.fetch("1", "RFC822")?;
-    let message = if let Some(m) = messages.iter().next() {
-        m
-    } else {
-        return Ok(None);
-    };
+    let messages = session.fetch(format!("{n}"), "RFC822")?;
+    let mails: Vec<_> = messages
+        .into_iter()
+        .map(|msg| match msg.body() {
+            Some(body) => std::str::from_utf8(body).map_err(|err| anyhow!(err)),
+            None => Err(anyhow!("no body for message: {msg:?}")),
+        })
+        .collect();
 
-    // extract the message's body
-    let body = message.body().expect("message did not have a body!");
-    let body = std::str::from_utf8(body)
-        .expect("message was not valid utf-8")
-        .to_string();
+    for mail in mails.iter() {
+        if let Err(err) = mail {
+            return Err(anyhow!(format!("{err:?}")));
+        }
+    }
 
-    // be nice to the server and log out
-    session.logout()?;
+    let clean_mails = mails
+        .into_iter()
+        .flat_map(|mail| mail.map(|content| content.to_owned()))
+        .collect();
 
-    Ok(Some(body))
+    Ok(clean_mails)
 }
 
 #[tokio::main]
@@ -152,10 +163,19 @@ async fn main() -> anyhow::Result<()> {
         .next()
         .expect("there was no next line")?;
 
-    let res = request_google_oauth_token(&auth_params, &code).await?;
-    let msg = fetch_inbox_top(res.access_token).unwrap().unwrap();
+    let GoogleOAuthResponse { access_token } =
+        request_google_oauth_token(&auth_params, &code).await?;
 
-    println!("{msg}");
+    let imap_auth = ImapOAuth2 {
+        user: "gschwantnermoritz@gmail.com".to_owned(),
+        access_token,
+    };
 
+    let mut session = create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?;
+    let msg = fetch_top_n_msg_from_inbox(&mut session, 2)?;
+
+    println!("{msg:?}");
+
+    session.logout()?;
     Ok(())
 }
