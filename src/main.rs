@@ -186,13 +186,17 @@ async fn main() -> anyhow::Result<()> {
                                 )
                                 .await?;
 
-                            // TODO update user.toml file
+                            let user_data = UserData {
+                                email: email.clone(),
+                                access_token: access_token.clone(),
+                                refresh_token,
+                            };
+                            write_user_data(&user_data)?;
 
                             let imap_auth = ImapOAuth2 {
                                 user: email,
                                 access_token,
                             };
-
                             create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?
                         }
                     };
@@ -203,7 +207,7 @@ async fn main() -> anyhow::Result<()> {
 
                 session.logout()?;
             } else {
-                todo!();
+                return Err(anyhow!("failed to find home directory"));
             }
         }
     }
