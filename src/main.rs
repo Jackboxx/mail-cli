@@ -4,14 +4,16 @@ use std::{
     net::TcpStream,
 };
 
-use anyhow::{anyhow, Ok};
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use imap::Session;
 use native_tls::TlsStream;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::google::{
-    request_google_oauth_token, GoogleOAuthParams, GoogleOAuthResponse, GOOGLE_IMAP_DOMAIN,
+    refresh_google_oauth_token, request_google_oauth_token, GoogleOAuthParams,
+    GoogleOAuthTokenRefreshResponse, GoogleOAuthTokenRequestResponse, GOOGLE_IMAP_DOMAIN,
     GOOGLE_IMAP_PORT,
 };
 
@@ -25,6 +27,8 @@ mod google;
 enum Commands {
     #[command(about = "login to email", long_about = "login to email")]
     Login { email: String },
+    #[command(about = "read emails", long_about = "read emails")]
+    Read { n: u32 },
 }
 
 #[derive(Debug, Parser)]
@@ -56,6 +60,7 @@ impl imap::Authenticator for ImapOAuth2 {
     }
 }
 
+/// Errors: if credentials are invalid or access token is expired
 fn create_imap_session(
     domain: &str,
     port: u16,
@@ -116,10 +121,12 @@ async fn main() -> anyhow::Result<()> {
                 .next()
                 .expect("there was no next line")?;
 
-            let GoogleOAuthResponse {
+            let client = Client::new();
+
+            let GoogleOAuthTokenRequestResponse {
                 access_token,
                 refresh_token,
-            } = request_google_oauth_token(&auth_params, &code).await?;
+            } = request_google_oauth_token(&client, &auth_params, &code).await?;
 
             if let Some(base_dir) = directories::BaseDirs::new() {
                 let data_dir = base_dir.data_dir().join("mail-cli/");
@@ -131,20 +138,63 @@ async fn main() -> anyhow::Result<()> {
 
                 fs::create_dir_all(&data_dir)?;
                 fs::write(&data_dir.join("user.toml"), toml::to_string_pretty(&data)?)?;
+            } else {
+                todo!();
             }
+        }
+        Commands::Read { n } => {
+            if let Some(base_dir) = directories::BaseDirs::new() {
+                let data_file = base_dir.data_dir().join("mail-cli/user.toml");
+                let data_str = match fs::read_to_string(data_file) {
+                    Ok(content) => content,
+                    Err(err) => match err.kind() {
+                        std::io::ErrorKind::NotFound => return Err(anyhow!( "you need to login before you can use this command: run `mail-cli login <email>`")),
+                        _ => return Err(err.into())
+                    },
+                };
 
-            // let imap_auth = ImapOAuth2 {
-            //     user: email,
-            //     access_token,
-            // };
+                let UserData {
+                    email,
+                    access_token,
+                    refresh_token,
+                } = toml::from_str(&data_str)?;
 
-            // let mut session =
-            //     create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?;
-            // let msg = fetch_top_n_msg_from_inbox(&mut session, 2)?;
+                let imap_auth = ImapOAuth2 {
+                    user: email.clone(),
+                    access_token,
+                };
 
-            // println!("{msg:?}");
+                let mut session =
+                    match create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth) {
+                        Ok(session) => session,
+                        Err(_) => {
+                            let GoogleOAuthTokenRefreshResponse { access_token } =
+                                refresh_google_oauth_token(
+                                    &Client::new(),
+                                    &GoogleOAuthParams::default(),
+                                    &refresh_token,
+                                )
+                                .await?;
 
-            // session.logout()?;
+                            // TODO update user.toml file
+
+                            let imap_auth = ImapOAuth2 {
+                                user: email,
+                                access_token,
+                            };
+
+                            create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?
+                        }
+                    };
+
+                let msg = fetch_top_n_msg_from_inbox(&mut session, n)?;
+
+                println!("{msg:?}");
+
+                session.logout()?;
+            } else {
+                todo!();
+            }
         }
     }
 
