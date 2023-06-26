@@ -149,6 +149,14 @@ fn fetch_top_n_msg_from_inbox(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
+    let stdin = io::stdin();
+
+    println!("enter your email:");
+    let email = stdin
+        .lock()
+        .lines()
+        .next()
+        .expect("there was no next line")?;
 
     let auth_params =
         GoogleOAuthParams::new(dotenv::var("CLIENT_ID")?, dotenv::var("CLIENT_SECRET")?);
@@ -156,7 +164,6 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", auth_params.get_token_request_url());
     println!("paste code here:");
 
-    let stdin = io::stdin();
     let code = stdin
         .lock()
         .lines()
@@ -167,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
         request_google_oauth_token(&auth_params, &code).await?;
 
     let imap_auth = ImapOAuth2 {
-        user: "gschwantnermoritz@gmail.com".to_owned(),
+        user: email,
         access_token,
     };
 
