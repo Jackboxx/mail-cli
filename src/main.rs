@@ -41,7 +41,7 @@ struct StoredAccountData {
     refresh_token: String,
 }
 
-struct ImapOAuth2 {
+struct ImapOAuth2Data {
     user: String,
     access_token: String,
 }
@@ -64,7 +64,7 @@ impl<'a> Completion for CompletionOptions<'a> {
     }
 }
 
-impl imap::Authenticator for ImapOAuth2 {
+impl imap::Authenticator for ImapOAuth2Data {
     type Response = String;
     fn process(&self, _: &[u8]) -> Self::Response {
         format!(
@@ -78,7 +78,7 @@ impl imap::Authenticator for ImapOAuth2 {
 fn create_imap_session(
     domain: &str,
     port: u16,
-    imap_auth: &ImapOAuth2,
+    imap_auth: &ImapOAuth2Data,
 ) -> anyhow::Result<Session<TlsStream<TcpStream>>> {
     let tls = native_tls::TlsConnector::builder().build()?;
     let client = imap::connect((domain, port), domain, &tls)?;
@@ -183,11 +183,15 @@ fn select_account(
         );
 
         let completion = CompletionOptions(mails);
-        let picked = Input::<String>::with_theme(&ColorfulTheme::default())
+        let picked = match Input::<String>::with_theme(&ColorfulTheme::default())
             .with_prompt(prompt)
             .completion_with(&completion)
             .interact_text()
-            .unwrap();
+            .ok()
+        {
+            Some(str) => str,
+            None => return None,
+        };
 
         accounts.get(&picked).map(|data| (picked, data.to_owned()))
     }
@@ -254,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
                         refresh_token,
                     },
                 )) => {
-                    let imap_auth = ImapOAuth2 {
+                    let imap_auth = ImapOAuth2Data {
                         user: email.clone(),
                         access_token,
                     };
@@ -280,7 +284,7 @@ async fn main() -> anyhow::Result<()> {
                                 accounts.insert(email.clone(), data);
                                 store_account_data(&accounts, &path, "accounts.toml")?;
 
-                                let imap_auth = ImapOAuth2 {
+                                let imap_auth = ImapOAuth2Data {
                                     user: email,
                                     access_token,
                                 };
