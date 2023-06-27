@@ -201,13 +201,11 @@ fn select_account(
 }
 
 /// writes user data to `user.toml` file creating all parent directories in the process
-fn store_account_data(
-    data: &HashMap<String, StoredAccountData>,
-    dir: &PathBuf,
-    filename: &str,
-) -> anyhow::Result<()> {
-    fs::create_dir_all(dir)?;
-    fs::write(&dir.join(filename), toml::to_string_pretty(data)?)?;
+fn store_account_data(data: &HashMap<String, StoredAccountData>) -> anyhow::Result<()> {
+    let path = get_data_dir_path()?;
+
+    fs::create_dir_all(&path)?;
+    fs::write(path.join("accounts.toml"), toml::to_string_pretty(data)?)?;
 
     Ok(())
 }
@@ -239,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
                 toml::from_str(&data_str)?;
 
             add_new_account(email, &mut existing_accounts).await?;
-            store_account_data(&existing_accounts, &path, "accounts.toml")?;
+            store_account_data(&existing_accounts)?;
         }
         Commands::Read { n } => {
             let path = get_data_dir_path()?;
@@ -285,12 +283,13 @@ async fn main() -> anyhow::Result<()> {
                                 };
 
                                 accounts.insert(email.clone(), data);
-                                store_account_data(&accounts, &path, "accounts.toml")?;
+                                store_account_data(&accounts)?;
 
                                 let imap_auth = ImapOAuth2Data {
                                     user: email,
                                     access_token,
                                 };
+
                                 create_imap_session(
                                     GOOGLE_IMAP_DOMAIN,
                                     GOOGLE_IMAP_PORT,
