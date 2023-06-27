@@ -107,7 +107,8 @@ pub async fn refresh_google_oauth_token(
     match res.status() {
         StatusCode::OK => Ok(res.json().await?),
         _ => Err(anyhow!(
-            "an error occurred while trying to retrieve access token",
+            "an error occurred while trying to retrieve access token, status code {status}",
+            status = res.status().as_u16(),
         )),
     }
 }

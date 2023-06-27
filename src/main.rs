@@ -1,13 +1,8 @@
-use std::{
-    collections::HashMap,
-    fs,
-    io::{stdin, BufRead},
-    net::TcpStream,
-    path::PathBuf,
-};
+use std::{collections::HashMap, fs, net::TcpStream, path::PathBuf};
 
 use anyhow::anyhow;
 use clap::{Parser, Subcommand};
+use dialoguer::{theme::ColorfulTheme, Completion, Input, Select};
 use imap::Session;
 use native_tls::TlsStream;
 use reqwest::Client;
@@ -40,7 +35,7 @@ struct CliArgs {
     command: Commands,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredAccountData {
     access_token: String,
     refresh_token: String,
@@ -49,6 +44,24 @@ struct StoredAccountData {
 struct ImapOAuth2 {
     user: String,
     access_token: String,
+}
+
+struct CompletionOptions<'a>(Vec<&'a str>);
+
+impl<'a> Completion for CompletionOptions<'a> {
+    fn get(&self, input: &str) -> Option<String> {
+        let matches = self
+            .0
+            .iter()
+            .filter(|option| option.starts_with(input))
+            .collect::<Vec<_>>();
+
+        if matches.len() == 1 {
+            Some(matches[0].to_string())
+        } else {
+            None
+        }
+    }
 }
 
 impl imap::Authenticator for ImapOAuth2 {
@@ -109,20 +122,28 @@ async fn add_new_account(
     existing_accounts: &mut HashMap<String, StoredAccountData>,
 ) -> anyhow::Result<()> {
     if existing_accounts.contains_key(&email) {
-        todo!("ask user if they want to override data");
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt(format!(
+                "do you want to override the exisiting data for the email {email}",
+            ))
+            .default(0)
+            .items(&["yes", "no"])
+            .interact()?;
+
+        if selection == 1 {
+            println!("login canceled");
+            return Ok(());
+        }
     }
 
     let auth_params = GoogleOAuthParams::default();
 
-    println!("{}", auth_params.get_token_request_url());
-    println!("paste code here:");
-
-    let stdin = stdin();
-    let code = stdin
-        .lock()
-        .lines()
-        .next()
-        .expect("there was no next line")?;
+    let code = Input::<String>::with_theme(&ColorfulTheme::default())
+        .with_prompt(format!(
+            "visit this link: {url}\nand paste the code from it here",
+            url = auth_params.get_token_request_url()
+        ))
+        .interact_text()?;
 
     let client = Client::new();
 
@@ -138,6 +159,38 @@ async fn add_new_account(
 
     existing_accounts.insert(email, data);
     Ok(())
+}
+
+fn select_account(
+    accounts: &HashMap<String, StoredAccountData>,
+) -> Option<(String, StoredAccountData)> {
+    if accounts.is_empty() {
+        None
+    } else if accounts.len() == 1 {
+        accounts
+            .iter()
+            .next()
+            .map(|(email, data)| (email.to_owned(), data.to_owned()))
+    } else {
+        let mails: Vec<_> = accounts.keys().map(|key| key.as_str()).collect();
+        let prompt = format!(
+            "choose an account from the list\n{list}\n",
+            list = mails
+                .iter()
+                .map(|mail| format!("- {mail}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        let completion = CompletionOptions(mails);
+        let picked = Input::<String>::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .completion_with(&completion)
+            .interact_text()
+            .unwrap();
+
+        accounts.get(&picked).map(|data| (picked, data.to_owned()))
+    }
 }
 
 /// writes user data to `user.toml` file creating all parent directories in the process
@@ -182,53 +235,71 @@ async fn main() -> anyhow::Result<()> {
             store_account_data(&existing_accounts, &path, "accounts.toml")?;
         }
         Commands::Read { n } => {
-            // let accounts = read_account_data(&get_data_dir_path()?.join("accounts.toml"))?;
+            let path = get_data_dir_path()?;
+            let data_str = match fs::read_to_string(&path.join("accounts.toml")) {
+                Ok(data) => data,
+                Err(err) => match err.kind() {
+                    std::io::ErrorKind::NotFound => String::new(),
+                    _ => return Err(err.into()),
+                },
+            };
 
-            // let (
-            //     email,
-            //     StoredAccountData {
-            //         access_token,
-            //         refresh_token,
-            //     },
-            // ): (String, StoredAccountData) = todo!("add function to get account");
+            let mut accounts: HashMap<String, StoredAccountData> = toml::from_str(&data_str)?;
 
-            // let imap_auth = ImapOAuth2 {
-            //     user: email.clone(),
-            //     access_token,
-            // };
+            match select_account(&accounts) {
+                Some((
+                    email,
+                    StoredAccountData {
+                        access_token,
+                        refresh_token,
+                    },
+                )) => {
+                    let imap_auth = ImapOAuth2 {
+                        user: email.clone(),
+                        access_token,
+                    };
 
-            // let mut session =
-            //     match create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth) {
-            //         Ok(session) => session,
-            //         Err(_) => {
-            //             let GoogleOAuthTokenRefreshResponse { access_token } =
-            //                 refresh_google_oauth_token(
-            //                     &Client::new(),
-            //                     &GoogleOAuthParams::default(),
-            //                     &refresh_token,
-            //                 )
-            //                 .await?;
+                    let mut session =
+                        match create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)
+                        {
+                            Ok(session) => session,
+                            Err(_) => {
+                                let GoogleOAuthTokenRefreshResponse { access_token } =
+                                    refresh_google_oauth_token(
+                                        &Client::new(),
+                                        &GoogleOAuthParams::default(),
+                                        &refresh_token,
+                                    )
+                                    .await?;
 
-            //             let data = StoredAccountData {
-            //                 access_token: access_token.clone(),
-            //                 refresh_token,
-            //             };
+                                let data = StoredAccountData {
+                                    access_token: access_token.clone(),
+                                    refresh_token,
+                                };
 
-            //             store_account_data(&data)?;
+                                accounts.insert(email.clone(), data);
+                                store_account_data(&accounts, &path, "accounts.toml")?;
 
-            //             let imap_auth = ImapOAuth2 {
-            //                 user: email,
-            //                 access_token,
-            //             };
-            //             create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?
-            //         }
-            //     };
+                                let imap_auth = ImapOAuth2 {
+                                    user: email,
+                                    access_token,
+                                };
+                                create_imap_session(
+                                    GOOGLE_IMAP_DOMAIN,
+                                    GOOGLE_IMAP_PORT,
+                                    &imap_auth,
+                                )?
+                            }
+                        };
 
-            // let msg = fetch_top_n_msg_from_inbox(&mut session, n)?;
+                    let msg = fetch_top_n_msg_from_inbox(&mut session, n)?;
 
-            // println!("{msg:?}");
+                    println!("{msg:?}");
 
-            // session.logout()?;
+                    session.logout()?;
+                }
+                None => todo!("handle no account selected"),
+            }
         }
     }
 
