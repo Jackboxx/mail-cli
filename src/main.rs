@@ -117,6 +117,9 @@ fn fetch_top_n_msg_from_inbox(
     Ok(clean_mails)
 }
 
+/// at the moment this function creates its own client and auth parameters (specifically for
+/// google/gmail), in the future when there are multiple email providers supported these should
+/// be passed in as function parameters
 async fn add_new_account(
     email: String,
     existing_accounts: &mut HashMap<String, StoredAccountData>,
