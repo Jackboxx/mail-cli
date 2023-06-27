@@ -1,7 +1,9 @@
 use std::{
+    collections::HashMap,
     fs,
     io::{stdin, BufRead},
     net::TcpStream,
+    path::PathBuf,
 };
 
 use anyhow::anyhow;
@@ -39,8 +41,7 @@ struct CliArgs {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct UserData {
-    email: String,
+struct StoredAccountData {
     access_token: String,
     refresh_token: String,
 }
@@ -103,7 +104,14 @@ fn fetch_top_n_msg_from_inbox(
     Ok(clean_mails)
 }
 
-async fn login(email: String) -> anyhow::Result<()> {
+async fn add_new_account(
+    email: String,
+    existing_accounts: &mut HashMap<String, StoredAccountData>,
+) -> anyhow::Result<()> {
+    if existing_accounts.contains_key(&email) {
+        todo!("ask user if they want to override data");
+    }
+
     let auth_params = GoogleOAuthParams::default();
 
     println!("{}", auth_params.get_token_request_url());
@@ -123,24 +131,30 @@ async fn login(email: String) -> anyhow::Result<()> {
         refresh_token,
     } = request_google_oauth_token(&client, &auth_params, &code).await?;
 
-    let user_data = UserData {
-        email,
+    let data = StoredAccountData {
         access_token,
         refresh_token,
     };
 
-    write_user_data(&user_data)
+    existing_accounts.insert(email, data);
+    Ok(())
 }
 
 /// writes user data to `user.toml` file creating all parent directories in the process
-fn write_user_data(data: &UserData) -> anyhow::Result<()> {
+fn store_account_data(
+    data: &HashMap<String, StoredAccountData>,
+    dir: &PathBuf,
+    filename: &str,
+) -> anyhow::Result<()> {
+    fs::create_dir_all(dir)?;
+    fs::write(&dir.join(filename), toml::to_string_pretty(data)?)?;
+
+    Ok(())
+}
+
+fn get_data_dir_path() -> anyhow::Result<PathBuf> {
     if let Some(base_dir) = directories::BaseDirs::new() {
-        let data_dir = base_dir.data_dir().join("mail-cli/");
-
-        fs::create_dir_all(&data_dir)?;
-        fs::write(&data_dir.join("user.toml"), toml::to_string_pretty(data)?)?;
-
-        Ok(())
+        Ok(base_dir.data_dir().join("mail-cli/"))
     } else {
         Err(anyhow!("failed to find home directory"))
     }
@@ -151,64 +165,70 @@ async fn main() -> anyhow::Result<()> {
     let args = CliArgs::parse();
 
     match args.command {
-        Commands::Login { email } => login(email).await?,
+        Commands::Login { email } => {
+            let path = get_data_dir_path()?;
+            let data_str = match fs::read_to_string(&path.join("accounts.toml")) {
+                Ok(data) => data,
+                Err(err) => match err.kind() {
+                    std::io::ErrorKind::NotFound => String::new(),
+                    _ => return Err(err.into()),
+                },
+            };
+
+            let mut existing_accounts: HashMap<String, StoredAccountData> =
+                toml::from_str(&data_str)?;
+
+            add_new_account(email, &mut existing_accounts).await?;
+            store_account_data(&existing_accounts, &path, "accounts.toml")?;
+        }
         Commands::Read { n } => {
-            if let Some(base_dir) = directories::BaseDirs::new() {
-                let data_file = base_dir.data_dir().join("mail-cli/user.toml");
-                let data_str = match fs::read_to_string(data_file) {
-                    Ok(content) => content,
-                    Err(err) => match err.kind() {
-                        std::io::ErrorKind::NotFound => return Err(anyhow!( "you need to login before you can use this command: run `mail-cli login <email>`")),
-                        _ => return Err(err.into())
-                    },
-                };
+            // let accounts = read_account_data(&get_data_dir_path()?.join("accounts.toml"))?;
 
-                let UserData {
-                    email,
-                    access_token,
-                    refresh_token,
-                } = toml::from_str(&data_str)?;
+            // let (
+            //     email,
+            //     StoredAccountData {
+            //         access_token,
+            //         refresh_token,
+            //     },
+            // ): (String, StoredAccountData) = todo!("add function to get account");
 
-                let imap_auth = ImapOAuth2 {
-                    user: email.clone(),
-                    access_token,
-                };
+            // let imap_auth = ImapOAuth2 {
+            //     user: email.clone(),
+            //     access_token,
+            // };
 
-                let mut session =
-                    match create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth) {
-                        Ok(session) => session,
-                        Err(_) => {
-                            let GoogleOAuthTokenRefreshResponse { access_token } =
-                                refresh_google_oauth_token(
-                                    &Client::new(),
-                                    &GoogleOAuthParams::default(),
-                                    &refresh_token,
-                                )
-                                .await?;
+            // let mut session =
+            //     match create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth) {
+            //         Ok(session) => session,
+            //         Err(_) => {
+            //             let GoogleOAuthTokenRefreshResponse { access_token } =
+            //                 refresh_google_oauth_token(
+            //                     &Client::new(),
+            //                     &GoogleOAuthParams::default(),
+            //                     &refresh_token,
+            //                 )
+            //                 .await?;
 
-                            let user_data = UserData {
-                                email: email.clone(),
-                                access_token: access_token.clone(),
-                                refresh_token,
-                            };
-                            write_user_data(&user_data)?;
+            //             let data = StoredAccountData {
+            //                 access_token: access_token.clone(),
+            //                 refresh_token,
+            //             };
 
-                            let imap_auth = ImapOAuth2 {
-                                user: email,
-                                access_token,
-                            };
-                            create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?
-                        }
-                    };
+            //             store_account_data(&data)?;
 
-                let msg = fetch_top_n_msg_from_inbox(&mut session, n)?;
+            //             let imap_auth = ImapOAuth2 {
+            //                 user: email,
+            //                 access_token,
+            //             };
+            //             create_imap_session(GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT, &imap_auth)?
+            //         }
+            //     };
 
-                println!("{msg:?}");
+            // let msg = fetch_top_n_msg_from_inbox(&mut session, n)?;
 
-                session.logout()?;
-            } else {
-                return Err(anyhow!("failed to find home directory"));
-            }
+            // println!("{msg:?}");
+
+            // session.logout()?;
         }
     }
 
