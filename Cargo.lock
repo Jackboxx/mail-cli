@@ -717,12 +717,22 @@ dependencies = [
  "directories",
  "imap",
  "imap-proto 0.16.2",
+ "mail-parser",
  "native-tls",
  "reqwest",
  "rpassword",
  "serde",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "mail-parser"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4158a1c18963244e083888b21465846dfb68d6170850ed1ab4742edd57c9d47"
+dependencies = [
+ "encoding_rs",
 ]
 
 [[package]]

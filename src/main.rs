@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, Completion, Input, Select};
 use imap::Session;
+use mail_parser::Message;
 use native_tls::TlsStream;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -298,9 +299,24 @@ async fn main() -> anyhow::Result<()> {
                             }
                         };
 
-                    let msg = fetch_top_n_msg_from_inbox(&mut session, n)?;
+                    let msg = fetch_top_n_msg_from_inbox(&mut session, n)?.join("");
+                    let msg = Message::parse(msg.as_bytes()).unwrap();
+                    println!("{:?}", msg.subject());
+                    println!("{:?}", msg.from());
+                    println!("{:?}", msg.date());
+                    println!(
+                        "{}",
+                        msg.text_bodies()
+                            .into_iter()
+                            .map(|b| b.text_contents().unwrap())
+                            .collect::<Vec<_>>()
+                            .join("")
+                    );
 
-                    println!("{msg:?}");
+                    // msg.get_headers()
+                    //     .into_iter()
+                    //     .for_each(|h| println!("{}: {}", h.get_key(), h.get_value()));
+                    // println!("{}", msg.get_body().unwrap());
 
                     session.logout()?;
                 }
