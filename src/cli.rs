@@ -19,7 +19,10 @@ pub struct CliArgs {
 #[derive(Debug, Subcommand)]
 pub enum Commands {
     #[command(about = "login to mail account")]
-    Login { email: String },
+    Login {
+        /// the mail address of the account you want to login to
+        email: String,
+    },
     #[command(about = "read mails")]
     Read {
         /// number of mails to read
