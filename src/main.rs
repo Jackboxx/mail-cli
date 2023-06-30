@@ -1,8 +1,9 @@
-use std::net::TcpStream;
+use std::{fmt::Display, net::TcpStream};
 
 use anyhow::anyhow;
 use clap::Parser;
 use cli::{add_new_account, select_account, CliArgs, Commands};
+use colored::Colorize;
 use imap::Session;
 use mail_parser::Message;
 use native_tls::TlsStream;
@@ -129,6 +130,10 @@ fn fetch_top_n_msg_from_inbox(
     Ok(clean_mails)
 }
 
+fn print_info<D: Display>(str: D) {
+    println!("{i} {str}", i = String::from("!").blue())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv()?;
@@ -139,9 +144,18 @@ async fn main() -> anyhow::Result<()> {
             let mut existing_accounts = StoredAccounts::load_data()?;
             add_new_account(email, &mut existing_accounts).await?;
         }
-        Commands::Read { n } => {
+        Commands::Read { n, mail } => {
             let mut accounts = StoredAccounts::load_data()?;
-            let account = select_account(accounts.map()).ok_or(anyhow!("no account selected"))?;
+            let account = match mail {
+                Some(mail) => match accounts.map().get(&mail) {
+                    Some(data) => (mail, data.to_owned()),
+                    None => {
+                        print_info(format!("no account with mail '{mail}' found"));
+                        select_account(accounts.map()).ok_or(anyhow!("no account selected"))?
+                    }
+                },
+                None => select_account(accounts.map()).ok_or(anyhow!("no account selected"))?,
+            };
 
             let (
                 email,

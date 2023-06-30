@@ -18,10 +18,19 @@ pub struct CliArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    #[command(about = "login to email", long_about = "login to email")]
+    #[command(about = "login to mail account")]
     Login { email: String },
-    #[command(about = "read emails", long_about = "read emails")]
-    Read { n: u32 },
+    #[command(about = "read mails")]
+    Read {
+        /// number of mails to read
+        n: u32,
+        /// optional mail, if not set you will be prompted to select from the list of logged in
+        /// accounts
+        /// if the mail you selected is not a logged in account the program will exist with a
+        /// failure
+        #[arg(short, long)]
+        mail: Option<String>,
+    },
 }
 
 pub struct CompletionOptions<'a>(Vec<&'a str>);
