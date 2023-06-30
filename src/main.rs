@@ -1,4 +1,4 @@
-use std::{fs, net::TcpStream};
+use std::net::TcpStream;
 
 use anyhow::anyhow;
 use clap::Parser;
@@ -8,7 +8,6 @@ use mail_parser::Message;
 use native_tls::TlsStream;
 use reqwest::Client;
 use store_accounts::{StoredAccountData, StoredAccounts};
-use utils::get_data_dir_path;
 
 use crate::google::{
     refresh_google_oauth_token, GoogleOAuthParams, GoogleOAuthTokenRefreshResponse,
@@ -48,9 +47,9 @@ fn create_imap_session(
     let tls = native_tls::TlsConnector::builder().build()?;
     let client = imap::connect((domain, port), domain, &tls)?;
 
-    Ok(client
+    client
         .authenticate("XOAUTH2", imap_auth)
-        .map_err(|err| anyhow!(format!("{err:?}")))?)
+        .map_err(|err| anyhow!(format!("{err:?}")))
 }
 
 /// tries to create a session with the given credentials.
@@ -70,7 +69,7 @@ async fn create_imap_session_with_refresh_on_err(
     email: String,
     accounts: &mut StoredAccounts,
 ) -> anyhow::Result<Session<TlsStream<TcpStream>>> {
-    match create_imap_session(domain, port, &imap_auth) {
+    match create_imap_session(domain, port, imap_auth) {
         Ok(session) => Ok(session),
         Err(_) => {
             let GoogleOAuthTokenRefreshResponse { access_token } = refresh_google_oauth_token(
@@ -134,7 +133,6 @@ fn display_mail(mail: Message) {
     println!(
         "{}",
         mail.text_bodies()
-            .into_iter()
             .map(|b| b.text_contents().unwrap())
             .collect::<Vec<_>>()
             .join("")
@@ -147,29 +145,11 @@ async fn main() -> anyhow::Result<()> {
 
     match args.command {
         Commands::Login { email } => {
-            let path = get_data_dir_path()?;
-            let data_str = match fs::read_to_string(&path.join("accounts.toml")) {
-                Ok(data) => data,
-                Err(err) => match err.kind() {
-                    std::io::ErrorKind::NotFound => String::new(),
-                    _ => return Err(err.into()),
-                },
-            };
-
-            let mut existing_accounts: StoredAccounts = toml::from_str(&data_str)?;
+            let mut existing_accounts = StoredAccounts::load_data()?;
             add_new_account(email, &mut existing_accounts).await?;
         }
         Commands::Read { n } => {
-            let path = get_data_dir_path()?;
-            let data_str = match fs::read_to_string(&path.join("accounts.toml")) {
-                Ok(data) => data,
-                Err(err) => match err.kind() {
-                    std::io::ErrorKind::NotFound => String::new(),
-                    _ => return Err(err.into()),
-                },
-            };
-
-            let mut accounts: StoredAccounts = toml::from_str(&data_str)?;
+            let mut accounts = StoredAccounts::load_data()?;
             let account = select_account(accounts.map()).ok_or(anyhow!("no account selected"))?;
 
             let (
@@ -196,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
             .await?;
 
             let res = fetch_top_n_msg_from_inbox(&mut session, n)?.join("");
-            let msg = Message::parse(res.as_bytes()).unwrap();
+            let Some(msg) = Message::parse(res.as_bytes()) else { return Err(anyhow!("failed to parse mail"))};
             display_mail(msg);
 
             session.logout()?;

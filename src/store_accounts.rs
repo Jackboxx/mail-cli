@@ -14,12 +14,17 @@ pub struct StoredAccountData {
 }
 
 impl StoredAccounts {
-    pub fn map(&self) -> &HashMap<String, StoredAccountData> {
-        &self.0
-    }
-    pub fn insert(&mut self, k: String, v: StoredAccountData) -> anyhow::Result<()> {
-        self.0.insert(k, v);
-        self.store_data()
+    pub fn load_data() -> anyhow::Result<Self> {
+        let path = get_data_dir_path()?.join("accounts.toml");
+        let data_str = match fs::read_to_string(path) {
+            Ok(data) => data,
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => String::new(),
+                _ => return Err(err.into()),
+            },
+        };
+
+        Ok(toml::from_str(&data_str)?)
     }
 
     pub fn store_data(&self) -> anyhow::Result<()> {
@@ -29,6 +34,14 @@ impl StoredAccounts {
         fs::write(path.join("accounts.toml"), toml::to_string_pretty(self)?)?;
 
         Ok(())
+    }
+
+    pub fn map(&self) -> &HashMap<String, StoredAccountData> {
+        &self.0
+    }
+    pub fn insert(&mut self, k: String, v: StoredAccountData) -> anyhow::Result<()> {
+        self.0.insert(k, v);
+        self.store_data()
     }
 }
 
