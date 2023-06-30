@@ -141,6 +141,7 @@ fn display_mail(mail: Message) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenv::dotenv()?;
     let args = CliArgs::parse();
 
     match args.command {

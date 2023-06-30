@@ -2,9 +2,6 @@ use anyhow::anyhow;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
-pub static GOOGLE_CLIENT_ID: &str =
-    "595889029500-45v36gai2da7jh6io8h7f2077bfv8cd2.apps.googleusercontent.com";
-pub static GOOGLE_CLIENT_SECRET: &str = "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";
 pub static GOOGLE_AUTH_ROOT_URL: &str = "https://oauth2.googleapis.com/token";
 pub static GOOGLE_IMAP_DOMAIN: &str = "imap.gmail.com";
 pub static GOOGLE_IMAP_PORT: u16 = 993;
@@ -29,10 +26,18 @@ pub struct GoogleOAuthParams {
 }
 
 impl Default for GoogleOAuthParams {
+    /// loads `client_id` and `client_secret` from `.env` file
+    ///
+    /// Panics:
+    /// - if it can't load the `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` environment variables
     fn default() -> Self {
+        let client_id = dotenv::var("GOOGLE_CLIENT_ID").expect("failed to load GOOGLE_CLIENT_ID");
+        let client_secret =
+            dotenv::var("GOOGLE_CLIENT_SECRET").expect("failed to load GOOGLE_CLIENT_SECRET");
+
         Self {
-            client_id: GOOGLE_CLIENT_ID.to_owned(),
-            client_secret: GOOGLE_CLIENT_SECRET.to_owned(),
+            client_id,
+            client_secret,
             redirect_url: "urn:ietf:wg:oauth:2.0:oob".to_owned(),
             scopes: "https://mail.google.com".to_owned(),
         }
