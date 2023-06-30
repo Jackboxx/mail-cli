@@ -9,9 +9,12 @@ use native_tls::TlsStream;
 use reqwest::Client;
 use store_accounts::{StoredAccountData, StoredAccounts};
 
-use crate::google::{
-    refresh_google_oauth_token, GoogleOAuthParams, GoogleOAuthTokenRefreshResponse,
-    GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT,
+use crate::{
+    google::{
+        refresh_google_oauth_token, GoogleOAuthParams, GoogleOAuthTokenRefreshResponse,
+        GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT,
+    },
+    mail::Mail,
 };
 
 extern crate imap;
@@ -20,6 +23,7 @@ extern crate rpassword;
 
 mod cli;
 mod google;
+mod mail;
 mod store_accounts;
 mod utils;
 
@@ -125,20 +129,6 @@ fn fetch_top_n_msg_from_inbox(
     Ok(clean_mails)
 }
 
-fn display_mail(mail: Message) {
-    println!("{:?}", mail.subject());
-    println!("{:?}", mail.from());
-    println!("{:?}", mail.to());
-    println!("{:?}", mail.date());
-    println!(
-        "{}",
-        mail.text_bodies()
-            .map(|b| b.text_contents().unwrap())
-            .collect::<Vec<_>>()
-            .join("")
-    );
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv()?;
@@ -178,7 +168,9 @@ async fn main() -> anyhow::Result<()> {
 
             let res = fetch_top_n_msg_from_inbox(&mut session, n)?.join("");
             let Some(msg) = Message::parse(res.as_bytes()) else { return Err(anyhow!("failed to parse mail"))};
-            display_mail(msg);
+            let mail = Mail::from(msg);
+
+            println!("{mail}");
 
             session.logout()?;
         }
