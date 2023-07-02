@@ -33,6 +33,9 @@ pub enum Commands {
         /// failure
         #[arg(short, long)]
         mail: Option<String>,
+        #[arg(short = 'b', long, default_value = "INBOX")]
+        /// the mailbox to read from
+        mailbox: String,
     },
 }
 

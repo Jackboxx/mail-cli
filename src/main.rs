@@ -5,17 +5,14 @@ use clap::Parser;
 use cli::{add_new_account, select_account, CliArgs, Commands};
 use colored::Colorize;
 use imap::Session;
-use mail_parser::Message;
+use mail::MailBox;
 use native_tls::TlsStream;
 use reqwest::Client;
 use store_accounts::{StoredAccountData, StoredAccounts};
 
-use crate::{
-    google::{
-        refresh_google_oauth_token, GoogleOAuthParams, GoogleOAuthTokenRefreshResponse,
-        GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT,
-    },
-    mail::Mail,
+use crate::google::{
+    refresh_google_oauth_token, GoogleOAuthParams, GoogleOAuthTokenRefreshResponse,
+    GOOGLE_IMAP_DOMAIN, GOOGLE_IMAP_PORT,
 };
 
 extern crate imap;
@@ -99,37 +96,6 @@ async fn create_imap_session_with_refresh_on_err(
     }
 }
 
-/// TODO: this has a bug
-/// it does not fetch the latest mails
-fn fetch_top_n_msg_from_inbox(
-    session: &mut Session<TlsStream<TcpStream>>,
-    n: u32,
-) -> anyhow::Result<Vec<String>> {
-    session.select("INBOX")?;
-
-    let messages = session.fetch(format!("{n}"), "RFC822")?;
-    let mails: Vec<_> = messages
-        .into_iter()
-        .map(|msg| match msg.body() {
-            Some(body) => std::str::from_utf8(body).map_err(|err| anyhow!(err)),
-            None => Err(anyhow!("no body for message: {msg:?}")),
-        })
-        .collect();
-
-    for mail in mails.iter() {
-        if let Err(err) = mail {
-            return Err(anyhow!(format!("{err:?}")));
-        }
-    }
-
-    let clean_mails = mails
-        .into_iter()
-        .flat_map(|mail| mail.map(|content| content.to_owned()))
-        .collect();
-
-    Ok(clean_mails)
-}
-
 fn print_info<D: Display>(str: D) {
     println!("{i} {str}", i = String::from("!").blue())
 }
@@ -144,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
             let mut existing_accounts = StoredAccounts::load_data()?;
             add_new_account(email, &mut existing_accounts).await?;
         }
-        Commands::Read { n, mail } => {
+        Commands::Read { n, mailbox, mail } => {
             let mut accounts = StoredAccounts::load_data()?;
             let account = match mail {
                 Some(mail) => match accounts.map().get(&mail) {
@@ -180,11 +146,13 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
 
-            let res = fetch_top_n_msg_from_inbox(&mut session, n)?.join("");
-            let Some(msg) = Message::parse(res.as_bytes()) else { return Err(anyhow!("failed to parse mail"))};
-            let mail = Mail::from(msg);
+            let mailbox = MailBox::new(&mailbox);
+            let mails = mailbox.fetch_n_msgs(n, &mut session)?;
 
-            println!("{mail}");
+            for mail in mails {
+                dbg!(mail.unwrap());
+                // println!("{mail}");
+            }
 
             session.logout()?;
         }
