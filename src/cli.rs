@@ -26,7 +26,7 @@ pub enum Commands {
     #[command(about = "read mails")]
     Read {
         /// number of mails to read
-        n: u32,
+        n: usize,
         /// optional mail, if not set you will be prompted to select from the list of logged in
         /// accounts
         /// if the mail you selected is not a logged in account the program will exist with a

@@ -150,8 +150,8 @@ async fn main() -> anyhow::Result<()> {
             let mails = mailbox.fetch_n_msgs(n, &mut session)?;
 
             for mail in mails {
-                dbg!(mail.unwrap());
-                // println!("{mail}");
+                let mail = mail?;
+                println!("{mail}");
             }
 
             session.logout()?;

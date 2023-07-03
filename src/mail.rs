@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::anyhow;
 use imap::Session;
+use itertools::Itertools;
 use mail_parser::{DateTime, Message};
 use native_tls::TlsStream;
 
@@ -37,20 +38,38 @@ impl<'a> MailBox<'a> {
         self.name
     }
 
-    /// TODO: this has a bug
-    /// it does not fetch the latest mails
-    ///
+    /// TODO: 
+    /// this is a horrid abomination that probably only works in 52% of cases.
+    /// this has to be fixed ASAP!!!!!
+    /// 
     /// Errors:
     /// - todo
     pub fn fetch_n_msgs(
         &self,
-        n: u32,
+        n: usize,
         session: &mut Session<TlsStream<TcpStream>>,
     ) -> anyhow::Result<Vec<anyhow::Result<Mail>>> {
         session.select(self.name())?;
 
-        let fetch_str = (0..n)
-            .map(|x| (x + 1).to_string())
+        let all_ord_nums = session.search("ALL")?;
+        let fetch_str = all_ord_nums.into_iter().join(",");
+
+        let recent_ord_nums: Vec<_> = session.fetch(&fetch_str, "BODY.PEEK[HEADER.FIELDS (DATE)]")?
+            .into_iter()
+            .map(|item| {
+                let header_str = from_utf8(item.header().unwrap_or(&[])).unwrap().split_once(":").unwrap().1.trim();
+                let date = chrono::DateTime::parse_from_rfc2822(header_str).unwrap();
+
+                (date, item.message)
+        })
+        .sorted_by(|(date_a, _), (date_b, _)| date_a.cmp(&date_b))
+        .rev()
+        .collect(); 
+
+        let fetch_str = recent_ord_nums
+            .into_iter()
+            .take(n)
+            .map(|(_, x)| x.to_string())
             .collect::<Vec<_>>()
             .join(",");
 
@@ -66,6 +85,7 @@ impl<'a> MailBox<'a> {
                 Ok(Mail::from_msg(parsed_msg, item.message))
                 
             })
+            .rev()
             .collect();
 
         Ok(mails)
