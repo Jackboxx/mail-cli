@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     net::TcpStream,
-    str::from_utf8,
+    str::from_utf8, collections::HashSet,
 };
 
 use anyhow::anyhow;
@@ -9,6 +9,8 @@ use imap::Session;
 use itertools::Itertools;
 use mail_parser::{DateTime, Message};
 use native_tls::TlsStream;
+
+use crate::mail_filters::{HeaderField, HeaderFilter};
 
 #[derive(Debug, Clone)]
 pub struct Mail {
@@ -38,38 +40,18 @@ impl<'a> MailBox<'a> {
         self.name
     }
 
-    /// TODO: 
-    /// this is a horrid abomination that probably only works in 52% of cases.
-    /// this has to be fixed ASAP!!!!!
-    /// 
-    /// Errors:
-    /// - todo
-    pub fn fetch_n_msgs(
+    pub fn fetch_n_recent_mails(
         &self,
         n: usize,
         session: &mut Session<TlsStream<TcpStream>>,
     ) -> anyhow::Result<Vec<anyhow::Result<Mail>>> {
         session.select(self.name())?;
 
-        let all_ord_nums = session.search("ALL")?;
-        let fetch_str = all_ord_nums.into_iter().join(",");
-
-        let recent_ord_nums: Vec<_> = session.fetch(&fetch_str, "BODY.PEEK[HEADER.FIELDS (DATE)]")?
-            .into_iter()
-            .map(|item| {
-                let header_str = from_utf8(item.header().unwrap_or(&[])).unwrap().split_once(":").unwrap().1.trim();
-                let date = chrono::DateTime::parse_from_rfc2822(header_str).unwrap();
-
-                (date, item.message)
-        })
-        .sorted_by(|(date_a, _), (date_b, _)| date_a.cmp(&date_b))
-        .rev()
-        .collect(); 
-
+        let recent_ord_nums = get_mails_sorted_by_date(session)?;
         let fetch_str = recent_ord_nums
             .into_iter()
             .take(n)
-            .map(|(_, x)| x.to_string())
+            .map(|x| x.to_string())
             .collect::<Vec<_>>()
             .join(",");
 
@@ -134,4 +116,27 @@ Subject:    {sub}
 
         write!(f, "{str}")
     }
+}
+
+/// returns ordering numbers of all mails in the selected mailbox order by date.
+/// the order is descending (newest -> oldest)
+fn get_mails_sorted_by_date(session: &mut Session<TlsStream<TcpStream>>) -> anyhow::Result<Vec<u32>> {
+    let all_ord_nums = session.search("ALL")?;
+    let fetch_str = all_ord_nums.into_iter().join(",");
+    let filter_str = HeaderFilter::new(HashSet::from([HeaderField::Date(None),]), false).filter_str().unwrap_or(String::new());
+
+    let recent_ord_nums: Vec<_> = session.fetch(&fetch_str, format!("BODY.PEEK[{filter_str}]"))?
+        .into_iter()
+        .map(|item| {
+            let header_str = from_utf8(item.header().unwrap_or(&[])).unwrap().split_once(":").unwrap().1.trim();
+            let date = chrono::DateTime::parse_from_rfc2822(header_str).unwrap();
+
+            (date, item.message)
+    })
+    .sorted_by(|(date_a, _), (date_b, _)| date_a.cmp(&date_b))
+    .rev()
+    .map(|(_, num)| num)
+    .collect(); 
+
+    Ok(recent_ord_nums)
 }

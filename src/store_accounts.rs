@@ -36,7 +36,7 @@ impl StoredAccounts {
         Ok(())
     }
 
-    pub fn map(&self) -> &HashMap<String, StoredAccountData> {
+    pub fn stored_accounts(&self) -> &HashMap<String, StoredAccountData> {
         &self.0
     }
     pub fn insert(&mut self, k: String, v: StoredAccountData) -> anyhow::Result<()> {

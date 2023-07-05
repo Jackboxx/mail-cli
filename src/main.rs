@@ -1,9 +1,8 @@
-use std::{fmt::Display, net::TcpStream};
+use std::net::TcpStream;
 
 use anyhow::anyhow;
 use clap::Parser;
-use cli::{add_new_account, select_account, CliArgs, Commands};
-use colored::Colorize;
+use cli::{add_new_account, print_info, select_account, CliArgs, Commands};
 use imap::Session;
 use mail::MailBox;
 use native_tls::TlsStream;
@@ -22,6 +21,7 @@ extern crate rpassword;
 mod cli;
 mod google;
 mod mail;
+mod mail_filters;
 mod store_accounts;
 mod utils;
 
@@ -96,10 +96,6 @@ async fn create_imap_session_with_refresh_on_err(
     }
 }
 
-fn print_info<D: Display>(str: D) {
-    println!("{i} {str}", i = String::from("!").blue())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv()?;
@@ -113,14 +109,16 @@ async fn main() -> anyhow::Result<()> {
         Commands::Read { n, mailbox, mail } => {
             let mut accounts = StoredAccounts::load_data()?;
             let account = match mail {
-                Some(mail) => match accounts.map().get(&mail) {
+                Some(mail) => match accounts.stored_accounts().get(&mail) {
                     Some(data) => (mail, data.to_owned()),
                     None => {
                         print_info(format!("no account with mail '{mail}' found"));
-                        select_account(accounts.map()).ok_or(anyhow!("no account selected"))?
+                        select_account(accounts.stored_accounts())
+                            .ok_or(anyhow!("no account selected"))?
                     }
                 },
-                None => select_account(accounts.map()).ok_or(anyhow!("no account selected"))?,
+                None => select_account(accounts.stored_accounts())
+                    .ok_or(anyhow!("no account selected"))?,
             };
 
             let (
@@ -147,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
             .await?;
 
             let mailbox = MailBox::new(&mailbox);
-            let mails = mailbox.fetch_n_msgs(n, &mut session)?;
+            let mails = mailbox.fetch_n_recent_mails(n, &mut session)?;
 
             for mail in mails {
                 let mail = mail?;

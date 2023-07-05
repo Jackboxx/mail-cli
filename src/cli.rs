@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, Completion, Input, Select};
 use reqwest::Client;
 
@@ -61,7 +62,7 @@ impl<'a> Completion for CompletionOptions<'a> {
 /// google/gmail), in the future when there are multiple email providers supported these should
 /// be passed in as function parameters
 pub async fn add_new_account(email: String, accounts: &mut StoredAccounts) -> anyhow::Result<()> {
-    if accounts.map().contains_key(&email) {
+    if accounts.stored_accounts().contains_key(&email) {
         let selection = Select::with_theme(&ColorfulTheme::default())
             .with_prompt(format!(
                 "do you want to override the exisiting data for the email {email}",
@@ -128,4 +129,8 @@ pub fn select_account(
 
         accounts.get(&picked).map(|data| (picked, data.to_owned()))
     }
+}
+
+pub fn print_info<D: Display>(str: D) {
+    println!("{i} {str}", i = String::from("!").blue())
 }
